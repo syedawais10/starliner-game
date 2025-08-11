@@ -6,11 +6,12 @@
   <title>Starliner — Voice in Meetings</title>
   <style>
     body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background: #0b0f1b; color: #e5e7eb; }
-    .wrap { max-width: 720px; margin: 20px auto; padding: 16px; background: #121a2a; border: 1px solid rgba(255,255,255,.1); border-radius: 12px; }
-    h1 { margin: 0 0 8px; }
-    input, button { font-size: 16px; }
+    .wrap { max-width: 960px; margin: 20px auto; padding: 16px; background: #121a2a; border: 1px solid rgba(255,255,255,.1); border-radius: 12px; }
+    h1 { margin: 0 0 8px; display:flex; align-items:center; gap:8px; }
+    input, button, select { font-size: 16px; }
     input[type="text"] { padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.15); background: #0f1424; color: #fff; }
     input[type="color"]{ width: 44px; height: 44px; padding: 0; border-radius: 8px; border: 1px solid rgba(255,255,255,.15); background: #0f1424; }
+    select { padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.15); background: #0f1424; color: #fff; }
     button { padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,.15); background: #1a1f3a; color: #fff; cursor: pointer; }
     button:disabled { opacity: .5; cursor: not-allowed; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
@@ -18,8 +19,8 @@
     .muted { color: #9aa4b2; }
     .box { padding: 10px; background: #0e1423; border: 1px solid rgba(255,255,255,.1); border-radius: 8px; }
 
-    #gameWrap { max-width: 720px; margin: 20px auto; padding: 10px; }
-    #game { width: 100%; height: 420px; display: block; background: radial-gradient(800px 400px at 50% 20%, #0b1230, #070b16); border: 1px solid rgba(255,255,255,.15); border-radius: 12px; }
+    #gameWrap { max-width: 960px; margin: 20px auto; padding: 10px; }
+    #game { width: 100%; height: 540px; display: block; background: #0a0f1e; border: 1px solid rgba(255,255,255,.15); border-radius: 12px; }
     #hint { text-align: center; color: #9aa4b2; font-size: 14px; margin-top: 6px; }
 
     .overlay { position: fixed; inset: 0; display: none; place-items: center; background: radial-gradient(1200px 600px at 50% 30%, rgba(125,211,252,.08), rgba(0,0,0,.65)); padding: 16px; }
@@ -28,12 +29,13 @@
     #chat input { width: 100%; }
     .voice { display:flex; gap:8px; flex-wrap:wrap; }
     #voicePeers .pill { margin-top: 6px; }
+    #hud { display:flex; justify-content:space-between; gap:10px; margin-top:6px; font-size:14px; color:#cbd5e1;}
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>⭐ Starliner — Voice in Meetings</h1>
-    <p class="muted">Pick a color, create/join a room, and start. Voice only during meetings.</p>
+    <p class="muted">Pick a color/hat/skin, create/join a room, and start. Voice only during meetings.</p>
 
     <div class="row">
       <label>Name</label>
@@ -42,6 +44,21 @@
       <input id="room" placeholder="ABCDE" type="text" />
       <label>Color</label>
       <input id="color" type="color" value="#8b5cf6" title="Suit color" />
+      <label>Hat</label>
+      <select id="hat">
+        <option value="none">None</option>
+        <option value="cap">Cap</option>
+        <option value="crown">Crown</option>
+        <option value="flower">Flower</option>
+        <option value="visor">Extra Visor</option>
+      </select>
+      <label>Skin</label>
+      <select id="skin">
+        <option value="none">None</option>
+        <option value="stripe">Stripe</option>
+        <option value="overalls">Overalls</option>
+        <option value="suit">Suit</option>
+      </select>
     </div>
 
     <div class="row">
@@ -56,6 +73,10 @@
       <div>Host ID: <span id="host" class="muted">-</span></div>
       <div>Phase: <b id="phase">lobby</b></div>
       <div>Your Role: <b id="role">unknown</b></div>
+      <div id="hud">
+        <div>Tasks: <span id="tasksDone">0</span>/<span id="tasksTotal">0</span></div>
+        <div id="taskHint" class="muted"></div>
+      </div>
       <div style="margin-top:8px">Players: <span id="players" class="muted">none</span></div>
     </div>
 
@@ -69,8 +90,8 @@
   </div>
 
   <div id="gameWrap">
-    <canvas id="game" width="720" height="420"></canvas>
-    <div id="hint">Move with WASD. Enjoy your colored astronaut!</div>
+    <canvas id="game" width="960" height="540"></canvas>
+    <div id="hint">Move with WASD. Press <b>E</b> to do tasks at yellow stations. Collision enabled.</div>
   </div>
 
   <!-- Meeting overlay -->

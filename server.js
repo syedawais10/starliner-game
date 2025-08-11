@@ -1,4 +1,7 @@
-// server.js — roles + kill + sabotages + meetings + voice signaling (alive-only) + COLOR support
+// server.js — meetings + roles + kill + sabotages + voice (alive-only)
+// + color / hat / skin
+// + basic task system (crew wins when enough tasks completed)
+
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -18,17 +21,26 @@ const server = app.listen(PORT, () => {
 
 const wss = new WebSocketServer({ server });
 
-const rooms = new Map(); // roomId -> room
+/*
+room = {
+  players: Map<id, {id,name,x,y,alive,role,color,hat,skin,killReadyAt,doneTasks:Set,ws}>,
+  hostId, phase, votes, sabotage,
+  killCooldownMs, totalTasks, tasksDone
+}
+*/
+const rooms = new Map();
 
 function ensureRoom(roomId) {
   if (!rooms.has(roomId)) {
     rooms.set(roomId, {
-      players: new Map(), // id -> {id,name,x,y,alive,role,color,killReadyAt,ws}
+      players: new Map(),
       hostId: null,
       phase: 'lobby',
       votes: new Map(),
       sabotage: { type: null },
-      killCooldownMs: 15000
+      killCooldownMs: 15000,
+      totalTasks: 0,
+      tasksDone: 0,
     });
   }
   return rooms.get(roomId);
@@ -39,13 +51,17 @@ function roomSnapshot(room, maskRoles = true) {
     hostId: room.hostId,
     phase: room.phase,
     sabotage: room.sabotage,
+    totalTasks: room.totalTasks,
+    tasksDone: room.tasksDone,
     players: [...room.players.values()].map(p => ({
       id: p.id,
       name: p.name,
       x: Math.round(p.x),
       y: Math.round(p.y),
       alive: p.alive,
-      color: p.color, // include color
+      color: p.color,
+      hat: p.hat,
+      skin: p.skin,
       role: maskRoles ? 'unknown' : p.role
     })),
   };
@@ -87,6 +103,7 @@ function checkWin(room) {
   const crewAlive = alive.length - sabAlive;
   if (sabAlive === 0) return 'crew';
   if (sabAlive >= crewAlive) return 'sab';
+  if (room.tasksDone >= room.totalTasks && room.totalTasks > 0) return 'crew';
   return null;
 }
 
@@ -98,7 +115,6 @@ function endGame(room, winner) {
 wss.on('connection', (ws) => {
   const playerId = uuid();
   let joinedRoomId = null;
-
   const send = (type, payload) => { try { ws.send(JSON.stringify({ type, payload })); } catch {} };
 
   ws.on('message', (buf) => {
@@ -113,7 +129,7 @@ wss.on('connection', (ws) => {
     }
 
     if (type === 'join') {
-      const { roomId, name, color } = payload || {};
+      const { roomId, name, color, hat, skin } = payload || {};
       if (!roomId) return;
       const rid = roomId.toUpperCase();
       const room = ensureRoom(rid);
@@ -124,16 +140,20 @@ wss.on('connection', (ws) => {
       const x = 300 + Math.random()*100;
       const y = 300 + Math.random()*100;
 
+      const validHex = (s) => typeof s === 'string' && /^#?[0-9a-fA-F]{6}$/.test(s);
+      const normHex = (s, def) => validHex(s) ? (s[0]==='#'?s:'#'+s) : def;
+
       room.players.set(playerId, {
         id: playerId,
         name: (name || 'Player').slice(0,18),
         x, y,
         alive: true,
         role: 'crew',
-        color: (typeof color === 'string' && /^#?[0-9a-fA-F]{6}$/.test(color))
-          ? (color[0] === '#' ? color : '#'+color)
-          : '#7dd3fc',
+        color: normHex(color, '#7dd3fc'),
+        hat: (['none','cap','crown','flower','visor'].includes(hat)) ? hat : 'none',
+        skin: (['none','stripe','overalls','suit'].includes(skin)) ? skin : 'none',
         killReadyAt: Date.now(),
+        doneTasks: new Set(),
         ws
       });
       joinedRoomId = rid;
@@ -148,13 +168,18 @@ wss.on('connection', (ws) => {
 
     if (type === 'startGame') {
       if (room.hostId !== playerId) return;
-      if (room.players.size < 3) return;
+      if (room.players.size < 3) return; // require 3+ to start
       assignRoles(room);
       room.phase = 'playing';
       room.votes.clear();
       room.sabotage = { type: null };
-      for (const p of room.players.values()) { p.alive = true; p.killReadyAt = Date.now(); }
+      room.tasksDone = 0;
+      const tasksPerPlayer = 2;
+      room.totalTasks = tasksPerPlayer * room.players.size;
       for (const p of room.players.values()) {
+        p.alive = true;
+        p.killReadyAt = Date.now();
+        p.doneTasks = new Set();
         p.ws.send(JSON.stringify({ type: 'role', payload: { role: p.role } }));
       }
       broadcast(room, 'phase', roomSnapshot(room));
@@ -252,6 +277,21 @@ wss.on('connection', (ws) => {
         room.phase = 'playing';
         broadcast(room, 'phase', roomSnapshot(room));
       }
+      return;
+    }
+
+    // ===== Tasks =====
+    // payload: { taskId: string }
+    if (type === 'taskComplete' && room.phase === 'playing') {
+      const p = room.players.get(playerId);
+      if (!p || !p.alive) return;
+      if (p.role !== 'crew') return;
+      const id = (payload?.taskId || '').toString();
+      if (!id || p.doneTasks.has(id)) return;
+      p.doneTasks.add(id);
+      room.tasksDone += 1;
+      broadcast(room, 'tasks', { tasksDone: room.tasksDone, totalTasks: room.totalTasks });
+      const win = checkWin(room); if (win) endGame(room, win);
       return;
     }
 

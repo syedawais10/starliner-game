@@ -1,80 +1,128 @@
-// client.js — adds colored astronauts; keeps meetings/chat/voice/roles/etc.
+// client.js — colors + hats/skins + idle/walk anim + map collision + simple tasks
 const $ = sel => document.querySelector(sel);
 
+// Lobby inputs
 const nameInput = $('#name');
 const roomInput = $('#room');
 const colorInput = $('#color');
+const hatInput   = $('#hat');
+const skinInput  = $('#skin');
 
+// Buttons
 const btnCreate = $('#create');
-const btnJoin = $('#join');
-const btnStart = $('#start');
+const btnJoin   = $('#join');
+const btnStart  = $('#start');
 
-const roomIdEl = $('#roomId');
-const meEl = $('#me');
-const hostEl = $('#host');
+const roomIdEl  = $('#roomId');
+const meEl      = $('#me');
+const hostEl    = $('#host');
 const playersEl = $('#players');
-const phaseEl = $('#phase');
-const roleEl = $('#role');
+const phaseEl   = $('#phase');
+const roleEl    = $('#role');
 
-const btnReport = $('#btnReport');
-const btnEmergency = $('#btnEmergency');
-const btnKill = $('#btnKill');
+const tasksDoneEl = $('#tasksDone');
+const tasksTotalEl= $('#tasksTotal');
+const taskHintEl  = $('#taskHint');
+
+// Actions
+const btnReport   = $('#btnReport');
+const btnEmergency= $('#btnEmergency');
+const btnKill     = $('#btnKill');
 const btnSabotage = $('#btnSabotage');
-const btnFix = $('#btnFix');
+const btnFix      = $('#btnFix');
 
+// Canvas
 const gameWrap = document.getElementById('gameWrap');
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
+const canvas   = document.getElementById('game');
+const ctx      = canvas.getContext('2d');
 
-const meeting = $('#meeting');
-const voteList = $('#voteList');
-const chatBox = $('#chat');
+// Meeting UI
+const meeting   = $('#meeting');
+const voteList  = $('#voteList');
+const chatBox   = $('#chat');
 const chatInput = $('#chatInput');
-const voteSkip = $('#voteSkip');
+const voteSkip  = $('#voteSkip');
 
+// Voice UI
 const vcJoin = $('#vcJoin');
 const vcMute = $('#vcMute');
-const vcLeave = $('#vcLeave');
+const vcLeave= $('#vcLeave');
 const voicePeers = $('#voicePeers');
 
+// WebSocket + status badge
 const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host);
-// Show connection status in the page title area
 const statusBadge = document.createElement('span');
 statusBadge.className = 'pill';
 statusBadge.style.marginLeft = '8px';
 statusBadge.textContent = 'WS: connecting…';
 document.querySelector('h1')?.appendChild(statusBadge);
-
 function updateWsBadge() {
   const s = ws.readyState;
   statusBadge.textContent = s===0 ? 'WS: connecting…' : s===1 ? 'WS: connected' : s===2 ? 'WS: closing…' : 'WS: closed';
   statusBadge.style.background = s===1 ? '#0f3a1f' : '#3a1f1f';
 }
-
-ws.addEventListener('open',   () => { console.log('[WS] open');   updateWsBadge(); });
-ws.addEventListener('close',  (e) => { console.log('[WS] close', e.code, e.reason); updateWsBadge(); });
-ws.addEventListener('error',  (e) => { console.error('[WS] error', e); updateWsBadge(); });
-
-// If you want to see all messages:
-ws.addEventListener('message', (e)=>{ /* console.log('[WS] msg', e.data); */ });
+ws.addEventListener('open',  updateWsBadge);
+ws.addEventListener('close', updateWsBadge);
+ws.addEventListener('error', updateWsBadge);
 updateWsBadge();
 
-
+// State
 let myId = null, currentRoomId = null, isHost = false;
 let phase = 'lobby';
 let myRole = 'unknown';
 let sabotage = { type: null };
-let players = new Map(); // id -> {id,name,x,y,alive,color,role}
+let players = new Map(); // id -> {id,name,x,y,alive,color,hat,skin,role}
+let tasksDone = 0, tasksTotal = 0;
+const myCompletedTasks = new Set(); // local help for hints
 
+// Input + anim state
 const keys = new Set();
 let lastSent = 0;
+let timeSec = 0; // animation time
 
 // Voice
 const peers = new Map();
 let mediaStream = null;
 let micEnabled = true;
 
-/* ===== WS ===== */
+/* ====== MAP (very simple) ====== */
+// Walls: array of rectangles {x,y,w,h}
+const walls = [
+  {x:40,y:40,w:880,h:20},   // top
+  {x:40,y:480,w:880,h:20},  // bottom
+  {x:40,y:60,w:20,h:420},   // left
+  {x:900,y:60,w:20,h:420},  // right
+
+  // rooms inside
+  {x:160,y:120,w:240,h:20},
+  {x:560,y:120,w:240,h:20},
+  {x:160,y:120,w:20,h:160},
+  {x:780,y:120,w:20,h:160},
+  {x:160,y:260,w:640,h:20},
+  {x:320,y:260,w:20,h:160},
+  {x:640,y:260,w:20,h:160},
+  {x:160,y:420,w:240,h:20},
+  {x:560,y:420,w:240,h:20},
+];
+
+// Task stations (static)
+const tasks = [
+  { id:'wires',   x:110, y:100,  label:'Wires' },
+  { id:'engine',  x:850, y:100,  label:'Engine' },
+  { id:'shields', x:110, y:450,  label:'Shields' },
+  { id:'nav',     x:850, y:450,  label:'Navigation' },
+  { id:'med',     x:490, y:340,  label:'Medbay' },
+];
+
+// Simple circle-rect collision
+function circleRectCollide(cx, cy, r, rect) {
+  const nx = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
+  const ny = Math.max(rect.y, Math.min(cy, rect.y + rect.h));
+  const dx = cx - nx, dy = cy - ny;
+  return (dx*dx + dy*dy) <= r*r;
+}
+
+/* ===== WS handlers ===== */
 ws.onmessage = (ev) => {
   const { type, payload } = JSON.parse(ev.data);
 
@@ -85,14 +133,19 @@ ws.onmessage = (ev) => {
 
   if (type === 'joined') {
     myId = payload.playerId; currentRoomId = payload.roomId; isHost = payload.isHost;
-    meEl.textContent = myId.slice(0, 8);
+    meEl.textContent = myId.slice(0,8);
     roomIdEl.textContent = currentRoomId;
 
-    phase = payload.snapshot.phase || 'lobby';
-    sabotage = payload.snapshot.sabotage || { type: null };
+    const snap = payload.snapshot || {};
+    phase = snap.phase || 'lobby';
+    sabotage = snap.sabotage || { type: null };
+    tasksDone = snap.tasksDone || 0;
+    tasksTotal = snap.totalTasks || 0;
+    tasksDoneEl.textContent = tasksDone;
+    tasksTotalEl.textContent = tasksTotal;
     phaseEl.textContent = phase;
 
-    applyPlayers(payload.snapshot.players, payload.snapshot.hostId);
+    applyPlayers(snap.players || [], snap.hostId);
     showGameArea(true);
     if (phase === 'meeting') { buildVoteList(); showMeeting(true); stopVoice(); }
     refreshHudButtons();
@@ -103,6 +156,10 @@ ws.onmessage = (ev) => {
   if (type === 'phase') {
     phase = payload.phase || phase; phaseEl.textContent = phase;
     sabotage = payload.sabotage || sabotage;
+    tasksDone = payload.tasksDone ?? tasksDone;
+    tasksTotal = payload.totalTasks ?? tasksTotal;
+    tasksDoneEl.textContent = tasksDone;
+    tasksTotalEl.textContent = tasksTotal;
     if (payload.players) applyPlayers(payload.players, payload.hostId);
     if (phase === 'meeting') { buildVoteList(); showMeeting(true); stopVoice(); }
     else { showMeeting(false); stopVoice(); }
@@ -115,24 +172,35 @@ ws.onmessage = (ev) => {
   if (type === 'role') { myRole = payload.role; roleEl.textContent = myRole==='sab'?'Saboteur':'Crew'; refreshHudButtons(); }
   if (type === 'killed') { const p = players.get(payload.targetId); if (p) p.alive = false; refreshHudButtons(); }
   if (type === 'sabotage' || type === 'sabotageUpdate') { sabotage = payload; refreshHudButtons(); }
-  if (type === 'gameEnded') { appendChat(`🏁 Game Over: ${payload.winner.toUpperCase()} win.`); phase='ended'; phaseEl.textContent='ended'; refreshHudButtons(); showMeeting(false); stopVoice(); }
+  if (type === 'tasks') { tasksDone = payload.tasksDone; tasksTotal = payload.totalTasks; tasksDoneEl.textContent = tasksDone; tasksTotalEl.textContent = tasksTotal; }
+
+  if (type === 'gameEnded') {
+    appendChat(`🏁 Game Over: ${payload.winner.toUpperCase()} win.`);
+    phase='ended'; phaseEl.textContent='ended';
+    refreshHudButtons(); showMeeting(false); stopVoice();
+  }
 
   if (type === 'rtc') handleRTC(payload);
 };
 
 /* ===== UI ===== */
-btnCreate.onclick = () => ws.send(JSON.stringify({ type:'createRoom' }));
+btnCreate.onclick = () => {
+  if (ws.readyState !== 1) return alert('Connecting to server…');
+  ws.send(JSON.stringify({ type:'createRoom' }));
+};
 btnJoin.onclick = () => {
-  const name = (nameInput.value || 'Player').trim();
-  const roomId = (roomInput.value || '').trim().toUpperCase();
+  const name  = (nameInput.value || 'Player').trim();
+  const roomId= (roomInput.value || '').trim().toUpperCase();
   const color = (colorInput.value || '#7dd3fc').trim();
-  if (!roomId) { alert('Enter a room code'); return; }
-  ws.send(JSON.stringify({ type:'join', payload:{ roomId, name, color } }));
+  const hat   = (hatInput.value || 'none');
+  const skin  = (skinInput.value || 'none');
+  if (!roomId) return alert('Enter a room code');
+  ws.send(JSON.stringify({ type:'join', payload:{ roomId, name, color, hat, skin } }));
 };
 btnStart.onclick = () => ws.send(JSON.stringify({ type:'startGame' }));
 
-btnReport.onclick = () => { if (phase==='playing') ws.send(JSON.stringify({ type:'report' })); };
-btnEmergency.onclick = () => { if (phase==='playing') ws.send(JSON.stringify({ type:'callMeeting' })); };
+btnReport.onclick   = () => { if (phase==='playing') ws.send(JSON.stringify({ type:'report' })); };
+btnEmergency.onclick= () => { if (phase==='playing') ws.send(JSON.stringify({ type:'callMeeting' })); };
 
 btnKill.onclick = () => {
   if (phase!=='playing' || myRole!=='sab') return;
@@ -205,8 +273,7 @@ function buildVoteList(){
   }
 }
 
-
-
+/* ===== Voice (meetings only & alive-only) ===== */
 vcJoin.onclick = async () => {
   if (vcJoin.disabled) return;
   try { if (!mediaStream) mediaStream = await navigator.mediaDevices.getUserMedia({ audio:true, video:false }); }
@@ -272,53 +339,152 @@ function removePeerAudio(id){
   const el=document.getElementById('audio-'+id); if (el){ try{ el.srcObject=null; el.remove(); } catch{} }
 }
 
-/* ===== Movement + Draw (astronauts!) ===== */
+/* ===== Movement + Anim + Tasks ===== */
 addEventListener('keydown', e => keys.add(e.key.toLowerCase()));
 addEventListener('keyup',   e => keys.delete(e.key.toLowerCase()));
+addEventListener('keypress', e => {
+  if (e.key.toLowerCase() === 'e') tryDoTask();
+});
 
 function update(dt){
   if (phase!=='playing') return;
-  const me = players.get(myId); if (!me || !me.alive) return;
-  const speed=220; let dx=0, dy=0;
-  if (keys.has('a')||keys.has('arrowleft')) dx-=1;
+  timeSec += dt;
+
+  const me = players.get(myId);
+  if (!me || !me.alive) return;
+
+  const speed = 230;
+  let dx=0, dy=0;
+  if (keys.has('a')||keys.has('arrowleft'))  dx-=1;
   if (keys.has('d')||keys.has('arrowright')) dx+=1;
-  if (keys.has('w')||keys.has('arrowup'))   dy-=1;
-  if (keys.has('s')||keys.has('arrowdown')) dy+=1;
+  if (keys.has('w')||keys.has('arrowup'))    dy-=1;
+  if (keys.has('s')||keys.has('arrowdown'))  dy+=1;
+
   if (dx||dy){
-    const len=Math.hypot(dx,dy)||1;
-    me.x+=(dx/len)*speed*dt; me.y+=(dy/len)*speed*dt;
-    me.x=Math.max(20,Math.min(980,me.x)); me.y=Math.max(20,Math.min(580,me.y));
-    const now=performance.now();
-    if (now-lastSent>66){ ws.send(JSON.stringify({ type:'move', payload:{ x:Math.round(me.x), y:Math.round(me.y) } })); lastSent=now; }
+    const len = Math.hypot(dx,dy)||1;
+    const nx = me.x + (dx/len)*speed*dt;
+    const ny = me.y + (dy/len)*speed*dt;
+    const r = 14;
+
+    // collision: reject move if collides any wall
+    if (!walls.some(w => circleRectCollide(nx, ny, r, w))) {
+      me.x = Math.max(20, Math.min(canvas.width-20, nx));
+      me.y = Math.max(20, Math.min(canvas.height-20, ny));
+      const now = performance.now();
+      if (now - lastSent > 66) {
+        ws.send(JSON.stringify({ type:'move', payload:{ x:Math.round(me.x), y:Math.round(me.y) } }));
+        lastSent = now;
+      }
+    }
+  }
+
+  // Show task hint if near
+  const near = nearestTask(me.x, me.y, 40);
+  if (near && myRole === 'crew' && !myCompletedTasks.has(near.id)) {
+    taskHintEl.textContent = `Press E to do task: ${near.label}`;
+  } else {
+    taskHintEl.textContent = '';
   }
 }
 
 function draw(){
+  // background
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.fillStyle='#0c1124'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = '#0b1226';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  ctx.strokeStyle='rgba(255,255,255,.06)';
-  for (let x=0;x<canvas.width;x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
-  for (let y=0;y<canvas.height;y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
+  // grid
+  ctx.strokeStyle = 'rgba(255,255,255,.05)';
+  for (let x=0; x<canvas.width; x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
+  for (let y=0; y<canvas.height; y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
 
-  ctx.fillStyle='rgba(255,255,255,.75)'; ctx.font='14px sans-serif';
-  let label='Phase: '+phase; if (sabotage.type==='lights') label+=' — Lights OFF'; if (sabotage.type==='o2') label+=' — O₂ in danger!';
+  // walls
+  ctx.fillStyle = '#141c32';
+  walls.forEach(r => ctx.fillRect(r.x, r.y, r.w, r.h));
+
+  // tasks
+  for (const t of tasks) {
+    ctx.fillStyle = '#facc15';
+    ctx.beginPath(); ctx.arc(t.x, t.y, 8, 0, Math.PI*2); ctx.fill();
+    ctx.font='12px sans-serif'; ctx.fillStyle='#e5e7eb'; ctx.textAlign='center';
+    ctx.fillText(t.label, t.x, t.y - 12);
+  }
+
+  // phase/sabo
+  ctx.fillStyle='rgba(255,255,255,.75)'; ctx.font='14px sans-serif'; ctx.textAlign='left';
+  let label = 'Phase: ' + phase;
+  if (sabotage.type==='lights') label+=' — Lights OFF';
+  if (sabotage.type==='o2') label+=' — O₂ in danger!';
   ctx.fillText(label, 12, 20);
 
+  // players
   for (const p of players.values()) {
-    drawAstronaut(p.x, p.y, p.color || '#7dd3fc', p.id===myId, !p.alive);
-    ctx.fillStyle='rgba(255,255,255,.9)';
-    ctx.font='12px sans-serif'; ctx.textAlign='center';
-    ctx.fillText(p.name, p.x, p.y - 24);
+    const moving = (p.id===myId) ? (keys.has('w')||keys.has('a')||keys.has('s')||keys.has('d')||keys.has('arrowup')||keys.has('arrowdown')||keys.has('arrowleft')||keys.has('arrowright')) : false;
+    const bob = moving ? Math.sin(timeSec*10)*1.2 : Math.sin(timeSec*2)*0.6;
+    drawAstronaut(p.x, p.y + bob, p.color || '#7dd3fc', p.id===myId, !p.alive, p.hat, p.skin, moving ? timeSec : 0);
+    ctx.fillStyle='rgba(255,255,255,.9)'; ctx.font='12px sans-serif'; ctx.textAlign='center';
+    ctx.fillText(p.name, p.x, p.y - 28);
   }
 }
 
-/* cute astronaut: body capsule, visor, backpack; darker outline if dead */
-function drawAstronaut(x, y, color, isMe, isDead){
-  const body = color;
-  const outline = isDead ? 'rgba(255,91,110,.7)' : 'rgba(0,0,0,.35)';
+/* ===== Tasks ===== */
+function nearestTask(x,y,r) {
+  let best=null, bestD=Infinity;
+  for (const t of tasks) {
+    const dx=t.x-x, dy=t.y-y, d2=dx*dx+dy*dy;
+    if (d2<r*r && d2<bestD){ best=t; bestD=d2; }
+  }
+  return best;
+}
+let doingTask = null; // {id,label,progress}
+function tryDoTask(){
+  if (phase!=='playing' || myRole!=='crew') return;
+  const me = players.get(myId); if (!me || !me.alive) return;
+  const t = nearestTask(me.x, me.y, 40);
+  if (!t || myCompletedTasks.has(t.id)) return;
+
+  // simple 2-second hold mini-task
+  doingTask = { id:t.id, label:t.label, progress:0 };
+}
+function drawTaskOverlay(){
+  if (!doingTask) return;
+  // advance progress while E is held
+  const holding = keys.has('e');
+  doingTask.progress += holding ? 0.02 : -0.03;
+  doingTask.progress = Math.max(0, Math.min(1, doingTask.progress));
+
+  // overlay
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,.6)';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '20px sans-serif'; ctx.textAlign='center';
+  ctx.fillText(`Task: ${doingTask.label} — Hold E`, canvas.width/2, canvas.height/2 - 30);
+
+  // bar
+  const bw=320, bh=16, bx=canvas.width/2 - bw/2, by=canvas.height/2;
+  ctx.fillStyle='#1f2937'; ctx.fillRect(bx,by,bw,bh);
+  ctx.fillStyle='#22c55e'; ctx.fillRect(bx,by,bw*doingTask.progress,bh);
+  ctx.strokeStyle='#ffffff'; ctx.strokeRect(bx,by,bw,bh);
+  ctx.restore();
+
+  if (doingTask.progress >= 1) {
+    // finished
+    myCompletedTasks.add(doingTask.id);
+    ws.send(JSON.stringify({ type:'taskComplete', payload:{ taskId: doingTask.id } }));
+    doingTask = null;
+  }
+}
+
+/* ===== Astronaut drawing with hats/skins & walk cycle ===== */
+function drawAstronaut(x, y, color, isMe, isDead, hat='none', skin='none', t=0){
   ctx.save();
   ctx.translate(x, y);
+
+  // walk cycle (simple leg swing)
+  const swing = t ? Math.sin(t*10) : 0;
+  const body = color;
+  const outline = isDead ? 'rgba(255,91,110,.7)' : 'rgba(0,0,0,.35)';
 
   // shadow
   ctx.globalAlpha = 0.25;
@@ -334,18 +500,52 @@ function drawAstronaut(x, y, color, isMe, isDead){
   roundRect(-10, -16, 22, 28, 10, true);
   ctx.strokeStyle = outline; ctx.lineWidth = 2; roundRect(-10, -16, 22, 28, 10, false);
 
-  // legs (simple)
+  // skin overlays
+  if (skin === 'stripe') {
+    ctx.fillStyle = shade(body, -30);
+    roundRect(-10, -2, 22, 6, 3, true);
+  } else if (skin === 'overalls') {
+    ctx.fillStyle = shade(body, -35);
+    roundRect(-10, 0, 22, 12, 4, true);
+  } else if (skin === 'suit') {
+    ctx.strokeStyle = shade('#ffffff', -120);
+    ctx.beginPath(); ctx.moveTo(-6, -6); ctx.lineTo(0, 2); ctx.lineTo(6,-6); ctx.stroke();
+  }
+
+  // legs with swing
   ctx.fillStyle = shade(body, -10);
-  roundRect(-8, 8, 8, 8, 3, true);
-  roundRect(2, 8, 8, 8, 3, true);
+  roundRect(-8, 8 + swing*1.2, 8, 8, 3, true);
+  roundRect( 2, 8 - swing*1.2, 8, 8, 3, true);
 
   // visor
   ctx.fillStyle = isMe ? '#c4f1ff' : '#bfe6ff';
   ctx.beginPath(); ctx.ellipse(2, -6, 8.5, 6.5, 0.05, 0, Math.PI*2); ctx.fill();
   ctx.strokeStyle = outline; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.ellipse(2, -6, 8.5, 6.5, 0.05, 0, Math.PI*2); ctx.stroke();
 
+  // hats
+  if (hat === 'cap') {
+    ctx.fillStyle = shade(body, -35);
+    roundRect(-6, -22, 14, 6, 3, true); // cap
+    ctx.fillRect(4, -18, 10, 3); // brim
+  } else if (hat === 'crown') {
+    ctx.fillStyle = '#facc15';
+    ctx.beginPath();
+    ctx.moveTo(-8, -18); ctx.lineTo(-4, -25); ctx.lineTo(0, -18); ctx.lineTo(4, -25); ctx.lineTo(8, -18);
+    ctx.closePath(); ctx.fill();
+  } else if (hat === 'flower') {
+    ctx.fillStyle = '#84cc16';
+    ctx.fillRect(-2, -22, 3, 6);
+    ctx.fillStyle = '#f472b6';
+    for (let i=0;i<5;i++){ const a=i*1.256; ctx.beginPath(); ctx.arc(-2+Math.cos(a)*5, -24+Math.sin(a)*5, 3, 0, Math.PI*2); ctx.fill(); }
+    ctx.fillStyle = '#fde68a'; ctx.beginPath(); ctx.arc(-2, -24, 2.5, 0, Math.PI*2); ctx.fill();
+  } else if (hat === 'visor') {
+    ctx.strokeStyle = '#9ca3af';
+    ctx.beginPath(); ctx.arc(2, -6, 10, Math.PI*1.1, Math.PI*1.9); ctx.stroke();
+  }
+
   ctx.restore();
 }
+
 function roundRect(x,y,w,h,r,fill){
   ctx.beginPath();
   ctx.moveTo(x+r,y);
@@ -355,7 +555,7 @@ function roundRect(x,y,w,h,r,fill){
   ctx.arcTo(x,y,x+w,y,r);
   fill ? ctx.fill() : ctx.stroke();
 }
-function shade(hex, amt){ // quick hex shade
+function shade(hex, amt){
   hex = hex.replace('#','');
   const num = parseInt(hex,16);
   let r=(num>>16)+amt, g=(num>>8 & 0xff)+amt, b=(num & 0xff)+amt;
@@ -363,12 +563,19 @@ function shade(hex, amt){ // quick hex shade
   return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
 }
 
-/* loop */
+/* ===== Loop ===== */
 let last = performance.now();
-function loop(t){ const dt=Math.min((t-last)/1000,1/30); last=t; update(dt); draw(); requestAnimationFrame(loop); }
+function loop(t){
+  const dt = Math.min((t - last)/1000, 1/30);
+  last = t;
+  update(dt);
+  draw();
+  drawTaskOverlay();
+  requestAnimationFrame(loop);
+}
 requestAnimationFrame(loop);
 
-/* utils */
+/* ===== Utils ===== */
 function escapeHtml(s){ return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function appendChat(html){ const div=document.createElement('div'); div.innerHTML=html; chatBox.appendChild(div); chatBox.scrollTop=chatBox.scrollHeight; }
 function nearestVictim(r){
