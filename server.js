@@ -1,4 +1,4 @@
-// server.js — roles + kill + sabotages + meetings + voice signaling (alive-only chat/voice)
+// server.js — roles + kill + sabotages + meetings + voice signaling (alive-only) + COLOR support
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -23,7 +23,7 @@ const rooms = new Map(); // roomId -> room
 function ensureRoom(roomId) {
   if (!rooms.has(roomId)) {
     rooms.set(roomId, {
-      players: new Map(), // id -> {id,name,x,y,alive,role,killReadyAt,ws}
+      players: new Map(), // id -> {id,name,x,y,alive,role,color,killReadyAt,ws}
       hostId: null,
       phase: 'lobby',
       votes: new Map(),
@@ -45,6 +45,7 @@ function roomSnapshot(room, maskRoles = true) {
       x: Math.round(p.x),
       y: Math.round(p.y),
       alive: p.alive,
+      color: p.color, // include color
       role: maskRoles ? 'unknown' : p.role
     })),
   };
@@ -112,7 +113,7 @@ wss.on('connection', (ws) => {
     }
 
     if (type === 'join') {
-      const { roomId, name } = payload || {};
+      const { roomId, name, color } = payload || {};
       if (!roomId) return;
       const rid = roomId.toUpperCase();
       const room = ensureRoom(rid);
@@ -123,7 +124,18 @@ wss.on('connection', (ws) => {
       const x = 300 + Math.random()*100;
       const y = 300 + Math.random()*100;
 
-      room.players.set(playerId, { id: playerId, name: (name || 'Player').slice(0,18), x, y, alive: true, role: 'crew', killReadyAt: Date.now(), ws });
+      room.players.set(playerId, {
+        id: playerId,
+        name: (name || 'Player').slice(0,18),
+        x, y,
+        alive: true,
+        role: 'crew',
+        color: (typeof color === 'string' && /^#?[0-9a-fA-F]{6}$/.test(color))
+          ? (color[0] === '#' ? color : '#'+color)
+          : '#7dd3fc',
+        killReadyAt: Date.now(),
+        ws
+      });
       joinedRoomId = rid;
 
       send('joined', { roomId: rid, playerId, isHost: room.hostId === playerId, snapshot: roomSnapshot(room) });
@@ -211,16 +223,16 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    // ===== Meeting chat: ALIVE ONLY =====
+    // Meeting chat — alive only
     if (type === 'chat' && room.phase === 'meeting') {
       const sender = room.players.get(playerId);
-      if (!sender || !sender.alive) return; // block dead chat
+      if (!sender || !sender.alive) return;
       const text = (payload?.text || '').toString().slice(0, 240);
       if (text.trim()) broadcast(room, 'chat', { from: sender.name, text });
       return;
     }
 
-    // Voting (alive only — already enforced)
+    // Vote (alive only)
     if (type === 'vote' && room.phase === 'meeting') {
       const voter = room.players.get(playerId);
       if (!voter || !voter.alive) return;
@@ -243,7 +255,7 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    // ===== WebRTC signaling: ALIVE ONLY (sender & target) =====
+    // WebRTC signaling (meeting only, alive-only sender & target)
     if (type === 'rtc' && room.phase === 'meeting') {
       const to = payload?.to;
       const sender = room.players.get(playerId);

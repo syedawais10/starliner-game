@@ -3,13 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Starliner — Meetings + Voice</title>
+  <title>Starliner — Voice in Meetings</title>
   <style>
     body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; background: #0b0f1b; color: #e5e7eb; }
     .wrap { max-width: 720px; margin: 20px auto; padding: 16px; background: #121a2a; border: 1px solid rgba(255,255,255,.1); border-radius: 12px; }
     h1 { margin: 0 0 8px; }
     input, button { font-size: 16px; }
-    input { padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.15); background: #0f1424; color: #fff; }
+    input[type="text"] { padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.15); background: #0f1424; color: #fff; }
+    input[type="color"]{ width: 44px; height: 44px; padding: 0; border-radius: 8px; border: 1px solid rgba(255,255,255,.15); background: #0f1424; }
     button { padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,.15); background: #1a1f3a; color: #fff; cursor: pointer; }
     button:disabled { opacity: .5; cursor: not-allowed; }
     .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
@@ -32,13 +33,15 @@
 <body>
   <div class="wrap">
     <h1>⭐ Starliner — Voice in Meetings</h1>
-    <p class="muted">Create/join, Start Game (host). During a meeting, click <b>Join Voice</b> to talk.</p>
+    <p class="muted">Pick a color, create/join a room, and start. Voice only during meetings.</p>
 
     <div class="row">
       <label>Name</label>
-      <input id="name" placeholder="Awais" maxlength="18" />
+      <input id="name" placeholder="Awais" maxlength="18" type="text" />
       <label>Room</label>
-      <input id="room" placeholder="ABCDE" />
+      <input id="room" placeholder="ABCDE" type="text" />
+      <label>Color</label>
+      <input id="color" type="color" value="#8b5cf6" title="Suit color" />
     </div>
 
     <div class="row">
@@ -67,7 +70,7 @@
 
   <div id="gameWrap">
     <canvas id="game" width="720" height="420"></canvas>
-    <div id="hint">Use W A S D during <b>playing</b>. Voice only during meetings.</div>
+    <div id="hint">Move with WASD. Enjoy your colored astronaut!</div>
   </div>
 
   <!-- Meeting overlay -->
