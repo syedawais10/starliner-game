@@ -532,7 +532,9 @@ function draw(){
   }
 }
 
-/* ===== Tasks ===== */
+/* ===== Tasks (time-based hold, mobile-friendly) ===== */
+
+// static task list is still defined near the top (no changes to server)
 function nearestTask(x,y,r) {
   let best=null, bestD=Infinity;
   for (const t of tasks) {
@@ -541,45 +543,101 @@ function nearestTask(x,y,r) {
   }
   return best;
 }
-let doingTask = null; // {id,label,progress}
+
+// state for the active mini-task (null when not running)
+let doingTask = null; // { id,label,type:'hold', neededMs:number, heldMs:number, button:{x,y,w,h} }
+let pointerHolding = false;
+
+// Start a task if near one and eligible
 function tryDoTask(){
   if (phase!=='playing' || myRole!=='crew') return;
   const me = players.get(myId); if (!me || !me.alive) return;
   const t = nearestTask(me.x, me.y, 40);
   if (!t || myCompletedTasks.has(t.id)) return;
 
-  // simple 2-second hold mini-task
-  doingTask = { id:t.id, label:t.label, progress:0 };
+  // open a "hold" task that needs exactly 2000ms of holding
+doingTask = {
+  id: t.id,
+  label: t.label,
+  type: 'hold',
+  neededMs: 2000,
+  heldMs: 0,
+  lastTs: performance.now(),             // ← NEW: per-frame time anchor
+  button: { x: canvas.width/2 - 120, y: canvas.height/2 + 16, w: 240, h: 56 }
+};
+
+  // reset any leftover pointer state
+  pointerHolding = false;
 }
+
+// draw + update the task overlay each frame
 function drawTaskOverlay(){
   if (!doingTask) return;
-  // advance progress while E is held
-  const holding = keys.has('e');
-  doingTask.progress += holding ? 0.02 : -0.03;
-  doingTask.progress = Math.max(0, Math.min(1, doingTask.progress));
 
-  // overlay
+const holdKey = keys.has('e');               // keyboard
+const holding = holdKey || pointerHolding;
+
+const now = performance.now();
+const dtMs = Math.min(now - doingTask.lastTs, 100); // cap to avoid big jumps
+doingTask.lastTs = now;
+
+if (holding) doingTask.heldMs += dtMs;       // accumulate real milliseconds
+
+
+  const progress = Math.max(0, Math.min(1, doingTask.heldMs / doingTask.neededMs));
+
+  // === overlay visuals ===
   ctx.save();
   ctx.fillStyle = 'rgba(0,0,0,.6)';
   ctx.fillRect(0,0,canvas.width,canvas.height);
+
   ctx.fillStyle = '#ffffff';
   ctx.font = '20px sans-serif'; ctx.textAlign='center';
-  ctx.fillText(`Task: ${doingTask.label} — Hold E`, canvas.width/2, canvas.height/2 - 30);
+  ctx.fillText(`Task: ${doingTask.label} — Hold E or press and hold the button`, canvas.width/2, canvas.height/2 - 40);
 
   // bar
-  const bw=320, bh=16, bx=canvas.width/2 - bw/2, by=canvas.height/2;
+  const bw = 420, bh = 16, bx = canvas.width/2 - bw/2, by = canvas.height/2 - 6;
   ctx.fillStyle='#1f2937'; ctx.fillRect(bx,by,bw,bh);
-  ctx.fillStyle='#22c55e'; ctx.fillRect(bx,by,bw*doingTask.progress,bh);
+  ctx.fillStyle='#22c55e'; ctx.fillRect(bx,by,bw*progress,bh);
   ctx.strokeStyle='#ffffff'; ctx.strokeRect(bx,by,bw,bh);
+
+  // big mobile button
+  const b = doingTask.button;
+  ctx.fillStyle = holding ? '#0ea5e9' : '#1f2937';
+  ctx.strokeStyle = '#e5e7eb';
+  ctx.lineWidth = 2;
+  roundRect(b.x, b.y, b.w, b.h, 10, true);
+  ctx.strokeRect(b.x, b.y, b.w, b.h);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '22px sans-serif';
+  ctx.fillText(holding ? 'HOLDING…' : 'HOLD', b.x + b.w/2, b.y + b.h/2 + 8);
+
   ctx.restore();
 
-  if (doingTask.progress >= 1) {
-    // finished
+  // === completion ===
+  if (progress >= 1) {
     myCompletedTasks.add(doingTask.id);
     ws.send(JSON.stringify({ type:'taskComplete', payload:{ taskId: doingTask.id } }));
     doingTask = null;
+    pointerHolding = false;
   }
 }
+
+// pointer (mouse/touch) support for the big HOLD button
+canvas.addEventListener('pointerdown', (e) => {
+  if (!doingTask) return;
+  const b = doingTask.button;
+  const rect = canvas.getBoundingClientRect();
+  const px = (e.clientX - rect.left) * (canvas.width / rect.width);
+  const py = (e.clientY - rect.top)  * (canvas.height / rect.height);
+  if (px >= b.x && px <= b.x+b.w && py >= b.y && py <= b.y+b.h) {
+    pointerHolding = true;
+  }
+});
+addEventListener('pointerup', () => { pointerHolding = false; });
+addEventListener('pointercancel', () => { pointerHolding = false; });
+
+
 
 /* ===== Astronaut drawing with hats/skins & walk cycle ===== */
 function drawAstronaut(x, y, color, isMe, isDead, hat='none', skin='none', t=0){
