@@ -38,6 +38,27 @@ const vcLeave = $('#vcLeave');
 const voicePeers = $('#voicePeers');
 
 const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host);
+// Show connection status in the page title area
+const statusBadge = document.createElement('span');
+statusBadge.className = 'pill';
+statusBadge.style.marginLeft = '8px';
+statusBadge.textContent = 'WS: connecting…';
+document.querySelector('h1')?.appendChild(statusBadge);
+
+function updateWsBadge() {
+  const s = ws.readyState;
+  statusBadge.textContent = s===0 ? 'WS: connecting…' : s===1 ? 'WS: connected' : s===2 ? 'WS: closing…' : 'WS: closed';
+  statusBadge.style.background = s===1 ? '#0f3a1f' : '#3a1f1f';
+}
+
+ws.addEventListener('open',   () => { console.log('[WS] open');   updateWsBadge(); });
+ws.addEventListener('close',  (e) => { console.log('[WS] close', e.code, e.reason); updateWsBadge(); });
+ws.addEventListener('error',  (e) => { console.error('[WS] error', e); updateWsBadge(); });
+
+// If you want to see all messages:
+ws.addEventListener('message', (e)=>{ /* console.log('[WS] msg', e.data); */ });
+updateWsBadge();
+
 
 let myId = null, currentRoomId = null, isHost = false;
 let phase = 'lobby';
