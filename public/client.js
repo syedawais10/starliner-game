@@ -313,6 +313,59 @@ function refreshHudButtons(){
 }
 function showGameArea(show){ gameWrap.style.display = show?'block':'none'; }
 function showMeeting(show){ meeting.style.display = show?'grid':'none'; if (show) chatBox.innerHTML=''; }
+// ===== Victory overlay helpers (exact drop-in) =====
+function onReturnToLobby() {
+  try { ws.close(); } catch {}
+  // Clean reload back to lobby UI
+  window.location.href = window.location.origin + window.location.pathname;
+}
+
+function ensureVictoryOverlay() {
+  // If it's already in HTML, just (re)bind the button and return
+  let v = document.getElementById('victory');
+  if (v) {
+    document.getElementById('btnPlayAgain')?.addEventListener('click', onReturnToLobby);
+    return;
+  }
+
+  // Otherwise, create it dynamically
+  v = document.createElement('div');
+  v.className = 'overlay';
+  v.id = 'victory';
+  v.style.display = 'none';
+  v.style.pointerEvents = 'auto';
+  v.style.zIndex = '9999';
+  v.innerHTML = `
+    <div class="panel" style="text-align:center">
+      <h2 id="victoryMsg">Game Over</h2>
+      <p class="muted" id="victorySub">Thanks for playing!</p>
+      <div class="row" style="justify-content:center;margin-top:10px">
+        <button class="btn" id="btnPlayAgain">Return to Lobby</button>
+      </div>
+    </div>`;
+  document.body.appendChild(v);
+  document.getElementById('btnPlayAgain').addEventListener('click', onReturnToLobby);
+}
+
+function showVictory(winner){
+  ensureVictoryOverlay();
+  const v  = document.getElementById('victory');
+  const h2 = document.getElementById('victoryMsg');
+  const p  = document.getElementById('victorySub');
+  const crewWin = (winner === 'crew');
+  if (h2) h2.textContent = crewWin ? '🎉 Crew Victory!' : '💀 Saboteurs Win!';
+  if (p)  p.textContent  = crewWin
+    ? 'All tasks were completed or all saboteurs were eliminated.'
+    : 'Saboteurs reached parity or a sabotage succeeded.';
+  document.getElementById('btnPlayAgain')?.addEventListener('click', onReturnToLobby);
+  v.style.display = 'grid';
+}
+
+function hideVictory(){
+  const v = document.getElementById('victory');
+  if (v) v.style.display = 'none';
+}
+
 function buildVoteList(){
   voteList.innerHTML = '';
   for (const p of players.values()) {
