@@ -205,9 +205,7 @@ function buildVoteList(){
   }
 }
 
-/* ===== Voice (unchanged rules: meeting & alive only) ===== */
-const peers = new Map();
-let mediaStream = null, micEnabled = true;
+
 
 vcJoin.onclick = async () => {
   if (vcJoin.disabled) return;
