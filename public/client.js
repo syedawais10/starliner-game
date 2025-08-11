@@ -164,7 +164,8 @@ ws.onmessage = (ev) => {
     if (phase === 'meeting') { buildVoteList(); showMeeting(true); stopVoice(); }
     else { showMeeting(false); stopVoice(); }
     refreshHudButtons();
-  }
+    if (phase === 'playing') hideVictory(); // new round
+}
 
   if (type === 'pos') { const p = players.get(payload.id); if (p) { p.x = payload.x; p.y = payload.y; } }
   if (type === 'chat') appendChat(`<b>${escapeHtml(payload.from)}:</b> ${escapeHtml(payload.text)}`);
@@ -174,14 +175,65 @@ ws.onmessage = (ev) => {
   if (type === 'sabotage' || type === 'sabotageUpdate') { sabotage = payload; refreshHudButtons(); }
   if (type === 'tasks') { tasksDone = payload.tasksDone; tasksTotal = payload.totalTasks; tasksDoneEl.textContent = tasksDone; tasksTotalEl.textContent = tasksTotal; }
 
-  if (type === 'gameEnded') {
-    appendChat(`🏁 Game Over: ${payload.winner.toUpperCase()} win.`);
-    phase='ended'; phaseEl.textContent='ended';
-    refreshHudButtons(); showMeeting(false); stopVoice();
-  }
+ if (type === 'gameEnded') {
+  console.log('[WS] gameEnded', payload); // debug
+  appendChat(`🏁 Game Over: ${payload.winner.toUpperCase()} win.`);
+  phase = 'ended';
+  phaseEl.textContent = 'ended';
+  showMeeting(false);
+  stopVoice();
+  refreshHudButtons();
+  showVictory(payload.winner);   // <-- show banner
+}
+
 
   if (type === 'rtc') handleRTC(payload);
 };
+
+function ensureVictoryOverlay() {
+  let v = document.getElementById('victory');
+  if (v) return; // already exists
+
+  const wrap = document.createElement('div');
+  wrap.className = 'overlay';
+  wrap.id = 'victory';
+  wrap.style.display = 'none';
+  wrap.style.pointerEvents = 'auto';
+  wrap.style.zIndex = '9999';
+
+  wrap.innerHTML = `
+    <div class="panel" style="text-align:center">
+      <h2 id="victoryMsg">Game Over</h2>
+      <p class="muted" id="victorySub">Thanks for playing!</p>
+      <div class="row" style="justify-content:center;margin-top:10px">
+        <button class="btn" id="btnPlayAgain">Return to Lobby</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+
+  document.getElementById('btnPlayAgain').onclick = () => location.reload();
+}
+
+function showVictory(winner){
+  ensureVictoryOverlay();
+  const v  = document.getElementById('victory');
+  const h2 = document.getElementById('victoryMsg');
+  const p  = document.getElementById('victorySub');
+  const crewWin = (winner === 'crew');
+  h2.textContent = crewWin ? '🎉 Crew Victory!' : '💀 Saboteurs Win!';
+  p.textContent  = crewWin
+    ? 'All tasks were completed or all saboteurs were eliminated.'
+    : 'Saboteurs reached parity or a sabotage succeeded.';
+  v.style.display = 'grid';
+}
+
+function hideVictory(){
+  const v = document.getElementById('victory');
+  if (v) v.style.display = 'none';
+}
+
+
+
 
 /* ===== UI ===== */
 btnCreate.onclick = () => {
