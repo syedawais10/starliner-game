@@ -204,7 +204,7 @@ wss.on('connection', (ws) => {
       const victim = room.players.get(payload?.targetId);
       if (!victim || !victim.alive) return;
       const dx = killer.x - victim.x, dy = killer.y - victim.y;
-      if (dx*dx + dy*dy > 120*120) return;
+      if (dx*dx + dy*dy > 70*70) return;
       victim.alive = false;
       killer.killReadyAt = Date.now() + room.killCooldownMs;
       broadcast(room, 'killed', { targetId: victim.id });

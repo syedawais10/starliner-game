@@ -85,34 +85,66 @@ const peers = new Map();
 let mediaStream = null;
 let micEnabled = true;
 
-/* ====== MAP (very simple) ====== */
-// Walls: array of rectangles {x,y,w,h}
+/* ====== MAP (ship image + tuned walls & task stations) ====== */
+
+// Load the map artwork (public/ship_map.png)
+const mapImage = new Image();
+mapImage.src = 'ship_map.png';
+
+// Collision helper: circle vs rect
+function circleRectCollide(cx, cy, r, rect) {
+  const nx = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
+  const ny = Math.max(rect.y, Math.min(cy, rect.y + rect.h));
+  const dx = cx - nx, dy = cy - ny;
+  return (dx*dx + dy*dy) <= r*r;
+}
+
+/*
+Canvas is 960 x 540 (index.html). These walls are sized for that canvas.
+They create outer hull + corridors/rooms. Tweak as you like later.
+*/
 const walls = [
-  {x:40,y:40,w:880,h:20},   // top
-  {x:40,y:480,w:880,h:20},  // bottom
-  {x:40,y:60,w:20,h:420},   // left
-  {x:900,y:60,w:20,h:420},  // right
+  // outer hull
+  {x: 8,  y: 8,  w: 944, h: 12},   // top
+  {x: 8,  y: 520, w: 944, h: 12},  // bottom
+  {x: 8,  y: 8,  w: 12,  h: 524},  // left
+  {x: 940, y: 8, w: 12,  h: 524},  // right
 
-  // rooms inside
-  {x:160,y:120,w:240,h:20},
-  {x:560,y:120,w:240,h:20},
-  {x:160,y:120,w:20,h:160},
-  {x:780,y:120,w:20,h:160},
-  {x:160,y:260,w:640,h:20},
-  {x:320,y:260,w:20,h:160},
-  {x:640,y:260,w:20,h:160},
-  {x:160,y:420,w:240,h:20},
-  {x:560,y:420,w:240,h:20},
+  // central spine
+  {x: 468, y: 80,  w: 12,  h: 380},
+
+  // upper rooms
+  {x: 120, y: 100, w: 240, h: 12},
+  {x: 120, y: 100, w: 12,  h: 120},
+  {x: 348, y: 100, w: 12,  h: 120},
+
+  {x: 600, y: 100, w: 240, h: 12},
+  {x: 600, y: 100, w: 12,  h: 120},
+  {x: 828, y: 100, w: 12,  h: 120},
+
+  // mid corridor bar
+  {x: 120, y: 260, w: 720, h: 12},
+
+  // lower rooms left
+  {x: 120, y: 360, w: 220, h: 12},
+  {x: 120, y: 360, w: 12,  h: 120},
+  {x: 328, y: 360, w: 12,  h: 120},
+
+  // lower rooms right
+  {x: 628, y: 360, w: 220, h: 12},
+  {x: 628, y: 360, w: 12,  h: 120},
+  {x: 836, y: 360, w: 12,  h: 120},
 ];
 
-// Task stations (static)
+// Fixed task stations (crew walk to yellow dot, press E)
 const tasks = [
-  { id:'wires',   x:110, y:100,  label:'Wires' },
-  { id:'engine',  x:850, y:100,  label:'Engine' },
-  { id:'shields', x:110, y:450,  label:'Shields' },
-  { id:'nav',     x:850, y:450,  label:'Navigation' },
-  { id:'med',     x:490, y:340,  label:'Medbay' },
+  { id: 'wires-upper-left',  label: 'Fix Wiring',        x: 140, y: 140 },
+  { id: 'nav-upper-right',   label: 'Align Navigation',  x: 820, y: 140 },
+  { id: 'med-mid',           label: 'Medbay Scan',       x: 490, y: 220 },
+  { id: 'engine-lower-left', label: 'Calibrate Engine',  x: 220, y: 420 },
+  { id: 'shields-lower-right', label: 'Prime Shields',   x: 740, y: 420 },
 ];
+
 
 // Simple circle-rect collision
 function circleRectCollide(cx, cy, r, rect) {
@@ -255,10 +287,22 @@ btnReport.onclick   = () => { if (phase==='playing') ws.send(JSON.stringify({ ty
 btnEmergency.onclick= () => { if (phase==='playing') ws.send(JSON.stringify({ type:'callMeeting' })); };
 
 btnKill.onclick = () => {
-  if (phase!=='playing' || myRole!=='sab') return;
-  const victim = nearestVictim(120);
-  if (victim) ws.send(JSON.stringify({ type:'kill', payload:{ targetId: victim.id } }));
+  if (phase !== 'playing' || myRole !== 'sab') return;
+
+  const victim = nearestVictim(140); // slightly easier range (was 120)
+  // show a quick hint if nobody is in range
+  if (!victim) {
+    taskHintEl.textContent = 'No one in kill range.';
+    setTimeout(() => { if (taskHintEl.textContent === 'No one in kill range.') taskHintEl.textContent = ''; }, 1000);
+    return;
+  }
+
+  ws.send(JSON.stringify({ type:'kill', payload:{ targetId: victim.id } }));
+  // brief feedback
+  taskHintEl.textContent = `Attempting kill on ${victim.name}…`;
+  setTimeout(() => { if (taskHintEl.textContent.startsWith('Attempting kill')) taskHintEl.textContent = ''; }, 800);
 };
+
 
 btnSabotage.onclick = () => {
   if (phase!=='playing' || myRole!=='sab' || sabotage.type) return;
@@ -449,6 +493,10 @@ addEventListener('keydown', e => keys.add(e.key.toLowerCase()));
 addEventListener('keyup',   e => keys.delete(e.key.toLowerCase()));
 addEventListener('keypress', e => {
   if (e.key.toLowerCase() === 'e') tryDoTask();
+if (e.key.toLowerCase() === 'q') {
+    // simulate clicking Kill
+    btnKill.click();
+  }
 });
 
 function update(dt){
@@ -466,23 +514,30 @@ function update(dt){
   if (keys.has('s')||keys.has('arrowdown'))  dy+=1;
 
   if (dx||dy){
-    const len = Math.hypot(dx,dy)||1;
-    const nx = me.x + (dx/len)*speed*dt;
-    const ny = me.y + (dy/len)*speed*dt;
-    const r = 14;
+  const len = Math.hypot(dx, dy) || 1;
+  const r   = 14;                               // player “radius”
+  const nx  = me.x + (dx/len) * speed * dt;     // candidate next X
+  const ny  = me.y + (dy/len) * speed * dt;     // candidate next Y
 
-    // collision: reject move if collides any wall
-    if (!walls.some(w => circleRectCollide(nx, ny, r, w))) {
-      me.x = Math.max(20, Math.min(canvas.width-20, nx));
-      me.y = Math.max(20, Math.min(canvas.height-20, ny));
-      const now = performance.now();
-      if (now - lastSent > 66) {
-        ws.send(JSON.stringify({ type:'move', payload:{ x:Math.round(me.x), y:Math.round(me.y) } }));
-        lastSent = now;
-      }
+  // reject the move if it would collide with any wall rectangle
+  const hitsWall = walls.some(w => circleRectCollide(nx, ny, r, w));
+  if (!hitsWall) {
+    me.x = Math.max(20, Math.min(canvas.width  - 20, nx));
+    me.y = Math.max(20, Math.min(canvas.height - 20, ny));
+
+    const now = performance.now();
+    if (now - lastSent > 66) {
+      ws.send(JSON.stringify({
+        type:'move',
+        payload:{ x: Math.round(me.x), y: Math.round(me.y) }
+      }));
+      lastSent = now;
     }
   }
+}
 
+     
+	  
   // Show task hint if near
   const near = nearestTask(me.x, me.y, 40);
   if (near && myRole === 'crew' && !myCompletedTasks.has(near.id)) {
@@ -493,27 +548,41 @@ function update(dt){
 }
 
 function draw(){
-  // background
-  ctx.clearRect(0,0,canvas.width,canvas.height);
+// Background: the map image (falls back to color while loading)
+ctx.clearRect(0,0,canvas.width,canvas.height);
+if (mapImage.complete && mapImage.naturalWidth > 0) {
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(mapImage, 0, 0, canvas.width, canvas.height);
+} else {
   ctx.fillStyle = '#0b1226';
   ctx.fillRect(0,0,canvas.width,canvas.height);
+}
 
-  // grid
-  ctx.strokeStyle = 'rgba(255,255,255,.05)';
-  for (let x=0; x<canvas.width; x+=40){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
-  for (let y=0; y<canvas.height; y+=40){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
+// (optional) wall debug overlay — comment out later if you want
+// ctx.fillStyle = 'rgba(255, 0, 0, 0.18)';
+// for (const w of walls) ctx.fillRect(w.x, w.y, w.w, w.h);
 
-  // walls
-  ctx.fillStyle = '#141c32';
-  walls.forEach(r => ctx.fillRect(r.x, r.y, r.w, r.h));
+// task stations (yellow dots)
+for (const t of tasks) {
+  ctx.fillStyle = '#facc15';
+  ctx.beginPath(); ctx.arc(t.x, t.y, 8, 0, Math.PI*2); ctx.fill();
+  ctx.font='12px sans-serif'; ctx.fillStyle='#e5e7eb'; ctx.textAlign='center';
+  ctx.fillText(t.label, t.x, t.y - 12);
+}
 
-  // tasks
-  for (const t of tasks) {
-    ctx.fillStyle = '#facc15';
-    ctx.beginPath(); ctx.arc(t.x, t.y, 8, 0, Math.PI*2); ctx.fill();
-    ctx.font='12px sans-serif'; ctx.fillStyle='#e5e7eb'; ctx.textAlign='center';
-    ctx.fillText(t.label, t.x, t.y - 12);
+// If saboteur during playing, draw a faint kill radius ring
+if (phase === 'playing' && myRole === 'sab') {
+  const me = players.get(myId);
+  if (me && me.alive) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,80,80,0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(me.x, me.y, 70, 0, Math.PI*2); // radius must match nearestVictim above
+    ctx.stroke();
+    ctx.restore();
   }
+}
 
   // phase/sabo
   ctx.fillStyle='rgba(255,255,255,.75)'; ctx.font='14px sans-serif'; ctx.textAlign='left';
