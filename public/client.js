@@ -49,6 +49,68 @@ const vcMute = $('#vcMute');
 const vcLeave= $('#vcLeave');
 const voicePeers = $('#voicePeers');
 
+// Mobile controls elements
+const joyEl = document.getElementById('joy');
+const joyStickEl = document.getElementById('joyStick');
+const btnTouchTask = document.getElementById('btnTouchTask');
+const btnTouchKill = document.getElementById('btnTouchKill');
+const btnTouchReport = document.getElementById('btnTouchReport');
+const btnTouchEmergency = document.getElementById('btnTouchEmergency');
+
+// Joystick state (adds to WASD)
+const joy = { active:false, vx:0, vy:0, radius:50 };
+
+function setJoyFromPointer(e){
+  const r = joyEl.getBoundingClientRect();
+  const cx = r.left + r.width/2;
+  const cy = r.top  + r.height/2;
+  const dx = e.clientX - cx;
+  const dy = e.clientY - cy;
+  const len = Math.hypot(dx, dy) || 1;
+  const clamp = Math.min(len, joy.radius);
+  const nx = dx / len * clamp;
+  const ny = dy / len * clamp;
+
+  // normalized [-1..1]
+  joy.vx = (nx / joy.radius);
+  joy.vy = (ny / joy.radius);
+
+  joyStickEl.style.transform = `translate(${nx}px, ${ny}px)`;
+}
+
+if (joyEl){
+  joyEl.addEventListener('pointerdown', (e) => {
+    joy.active = true;
+    joyEl.setPointerCapture?.(e.pointerId);
+    setJoyFromPointer(e);
+  }, {passive:false});
+
+  joyEl.addEventListener('pointermove', (e) => {
+    if (!joy.active) return;
+    setJoyFromPointer(e);
+  }, {passive:false});
+
+  const joyRelease = (e) => {
+    joy.active = false;
+    joy.vx = joy.vy = 0;
+    joyStickEl.style.transform = 'translate(0px,0px)';
+  };
+  joyEl.addEventListener('pointerup', joyRelease, {passive:false});
+  joyEl.addEventListener('pointercancel', joyRelease, {passive:false});
+}
+
+function safeTap(btn, fn){
+  if (!btn) return;
+  btn.addEventListener('click', (e)=>{ e.preventDefault(); fn(); }, {passive:false});
+  btn.addEventListener('pointerdown', (e)=> e.preventDefault(), {passive:false});
+}
+
+safeTap(btnTouchTask, () => { if (phase==='playing') tryDoTask(); });
+safeTap(btnTouchKill, () => { if (phase==='playing') btnKill.click(); });
+safeTap(btnTouchReport, () => { if (phase==='playing') btnReport.click(); });
+safeTap(btnTouchEmergency, () => { if (phase==='playing') btnEmergency.click(); });
+
+
 // WebSocket + status badge
 const ws = new WebSocket((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host);
 const statusBadge = document.createElement('span');
@@ -354,6 +416,12 @@ function refreshHudButtons(){
   chatInput.disabled = !(phase==='meeting' && meAlive);
   chatInput.placeholder = (phase==='meeting' && !meAlive) ? 'Dead players cannot chat' : 'Type to chat…';
   vcJoin.disabled = !(phase==='meeting' && meAlive); vcLeave.disabled = true; vcMute.disabled = true;
+// mirror to touch buttons
+if (btnTouchKill) btnTouchKill.disabled = !(phase==='playing' && isMeAlive() && myRole==='sab');
+if (btnTouchTask) btnTouchTask.disabled = !(phase==='playing' && isMeAlive());
+if (btnTouchReport) btnTouchReport.disabled = !(phase==='playing');
+if (btnTouchEmergency) btnTouchEmergency.disabled = !(phase==='playing');
+
 }
 function showGameArea(show){ gameWrap.style.display = show?'block':'none'; }
 function showMeeting(show){ meeting.style.display = show?'grid':'none'; if (show) chatBox.innerHTML=''; }
@@ -512,6 +580,12 @@ function update(dt){
   if (keys.has('d')||keys.has('arrowright')) dx+=1;
   if (keys.has('w')||keys.has('arrowup'))    dy-=1;
   if (keys.has('s')||keys.has('arrowdown'))  dy+=1;
+  // add joystick vector (mobile)
+if (joy.active){
+  dx += joy.vx;
+  dy += joy.vy;
+}
+
 
   if (dx||dy){
   const len = Math.hypot(dx, dy) || 1;

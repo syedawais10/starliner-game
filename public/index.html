@@ -30,6 +30,35 @@
     .voice { display:flex; gap:8px; flex-wrap:wrap; }
     #voicePeers .pill { margin-top: 6px; }
     #hud { display:flex; justify-content:space-between; gap:10px; margin-top:6px; font-size:14px; color:#cbd5e1;}
+	/* --- Mobile controls --- */
+#game, #gameWrap { touch-action: none; } /* stop page scrolling while touching canvas */
+
+#mobileControls{
+  display:flex; justify-content:space-between; align-items:center;
+  gap:16px; max-width:960px; margin:8px auto 0; padding:8px;
+  user-select:none; -webkit-user-select:none;
+}
+#joy {
+  position:relative; width:120px; height:120px; border-radius:999px;
+  background: rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.18);
+  touch-action:none;
+}
+#joyStick{
+  position:absolute; left:50%; top:50%; width:56px; height:56px; margin:-28px 0 0 -28px;
+  border-radius:999px; background: rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.25);
+  pointer-events:none;
+}
+#actionButtons{ display:flex; gap:8px; flex-wrap:wrap; }
+.touchBtn{
+  min-width:84px; padding:12px 14px; border-radius:10px;
+  background:#1a1f3a; color:#fff; border:1px solid rgba(255,255,255,.15);
+  touch-action:none;
+}
+/* Hide mobile controls on wide screens (desktop) */
+@media (min-width: 900px){
+  #mobileControls{ display:none; }
+}
+
   </style>
 </head>
 <body>
@@ -93,6 +122,17 @@
     <canvas id="game" width="960" height="540"></canvas>
     <div id="hint">Move with WASD. Press <b>E</b> to do tasks at yellow stations. Collision enabled.</div>
   </div>
+  
+<!-- Mobile controls (shown on phones) -->
+<div id="mobileControls">
+  <div id="joy"><div id="joyStick"></div></div>
+  <div id="actionButtons">
+    <button class="touchBtn" id="btnTouchTask">Task</button>
+    <button class="touchBtn" id="btnTouchKill">Kill</button>
+    <button class="touchBtn" id="btnTouchReport">Report</button>
+    <button class="touchBtn" id="btnTouchEmergency">Emergency</button>
+  </div>
+</div>
 
   <!-- Meeting overlay -->
   <div class="overlay" id="meeting">
