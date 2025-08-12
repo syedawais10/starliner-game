@@ -36,6 +36,42 @@ const gameWrap = document.getElementById('gameWrap');
 const canvas   = document.getElementById('game');
 const ctx      = canvas.getContext('2d');
 
+// Fixed world/view size (do NOT change game math)
+const VIEW_W = 960, VIEW_H = 540;
+
+// current scale from view units -> device pixels (computed in resizeCanvas)
+let VIEW_SCALE = 1;
+
+// Resize to fit width while keeping 16:9 and honoring devicePixelRatio
+function resizeCanvas(){
+  const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+
+  // target CSS width: fit container
+  const wrapW = Math.min(gameWrap.clientWidth || window.innerWidth, window.innerWidth - 16);
+  let cssW = wrapW;
+  let cssH = cssW * (VIEW_H / VIEW_W);
+
+  // ensure we don't exceed viewport height too much (leave room for controls)
+  const maxH = window.innerHeight - 220; // adjust if needed for your UI
+  if (cssH > maxH) {
+    cssH = Math.max(200, maxH);
+    cssW = cssH * (VIEW_W / VIEW_H);
+  }
+
+  // apply CSS size
+  canvas.style.width  = Math.round(cssW) + 'px';
+  canvas.style.height = Math.round(cssH) + 'px';
+
+  // set backing store to DPR for crisp rendering
+  canvas.width  = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+
+  // compute scale from view units to device pixels
+  VIEW_SCALE = (canvas.width / dpr) / VIEW_W; // scale in CSS pixels
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
 // Meeting UI
 const meeting   = $('#meeting');
 const voteList  = $('#voteList');
@@ -596,8 +632,9 @@ if (joy.active){
   // reject the move if it would collide with any wall rectangle
   const hitsWall = walls.some(w => circleRectCollide(nx, ny, r, w));
   if (!hitsWall) {
-    me.x = Math.max(20, Math.min(canvas.width  - 20, nx));
-    me.y = Math.max(20, Math.min(canvas.height - 20, ny));
+    me.x = Math.max(20, Math.min(VIEW_W  - 20, nx));
+    me.y = Math.max(20, Math.min(VIEW_H - 20, ny));
+
 
     const now = performance.now();
     if (now - lastSent > 66) {
@@ -622,15 +659,21 @@ if (joy.active){
 }
 
 function draw(){
-// Background: the map image (falls back to color while loading)
-ctx.clearRect(0,0,canvas.width,canvas.height);
+// Set transform so all drawing uses fixed view units (960x540)
+ctx.setTransform(VIEW_SCALE * (window.devicePixelRatio || 1), 0, 0, VIEW_SCALE * (window.devicePixelRatio || 1), 0, 0);
+
+// Clear the view area only
+ctx.clearRect(0, 0, VIEW_W, VIEW_H);
+
+// Background map
 if (mapImage.complete && mapImage.naturalWidth > 0) {
   ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(mapImage, 0, 0, canvas.width, canvas.height);
+  ctx.drawImage(mapImage, 0, 0, VIEW_W, VIEW_H);
 } else {
   ctx.fillStyle = '#0b1226';
-  ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 }
+
 
 // (optional) wall debug overlay — comment out later if you want
 // ctx.fillStyle = 'rgba(255, 0, 0, 0.18)';
@@ -706,7 +749,7 @@ doingTask = {
   neededMs: 2000,
   heldMs: 0,
   lastTs: performance.now(),             // ← NEW: per-frame time anchor
-  button: { x: canvas.width/2 - 120, y: canvas.height/2 + 16, w: 240, h: 56 }
+  button: { x: VIEW_W/2 - 120, y: VIEW_H/2 + 16, w: 240, h: 56 }
 };
 
   // reset any leftover pointer state
@@ -767,6 +810,15 @@ if (holding) doingTask.heldMs += dtMs;       // accumulate real milliseconds
 }
 
 // pointer (mouse/touch) support for the big HOLD button
+function toViewXY(e){
+  const rect = canvas.getBoundingClientRect();
+  const sx = VIEW_W / rect.width;
+  const sy = VIEW_H / rect.height;
+  return {
+    x: (e.clientX - rect.left) * sx,
+    y: (e.clientY - rect.top)  * sy
+  };
+}
 canvas.addEventListener('pointerdown', (e) => {
   if (!doingTask) return;
   const b = doingTask.button;
